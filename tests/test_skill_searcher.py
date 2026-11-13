@@ -1,0 +1,118 @@
+from pathlib import Path
+
+import pytest
+
+from pyconjury.skill_searcher import SkillSearcher
+
+
+def test_get_cli_commands_reads_project_scripts(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "sample"
+version = "0.1.0"
+
+[project.scripts]
+sample = "sample.cli:main"
+sample-admin = "sample.admin:main"
+""",
+        encoding="utf-8",
+    )
+
+    assert SkillSearcher(tmp_path).get_cli_commands() == ["sample", "sample-admin"]
+
+
+def test_get_cli_commands_returns_empty_when_project_has_no_scripts(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "sample"
+version = "0.1.0"
+""",
+        encoding="utf-8",
+    )
+
+    assert SkillSearcher(tmp_path).get_cli_commands() == []
+
+
+def test_get_cli_commands_rejects_malformed_scripts_table(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+scripts = "not-a-table"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"Invalid \[project\.scripts\] table"):
+        SkillSearcher(tmp_path).get_cli_commands()
+
+
+def test_infer_public_skills_requires_a_published_cli_invocation(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "sample"
+version = "0.1.0"
+
+[project.scripts]
+sample = "sample.cli:main"
+""",
+        encoding="utf-8",
+    )
+    public_skill = tmp_path / "skills" / "public"
+    public_skill.mkdir(parents=True)
+    (public_skill / "SKILL.md").write_text(
+        "Run `uvx sample --help` to use this workflow.",
+        encoding="utf-8",
+    )
+    unrelated_skill = tmp_path / "skills" / "unrelated"
+    unrelated_skill.mkdir(parents=True)
+    (unrelated_skill / "SKILL.md").write_text(
+        "Run `uvx other-command --help` to use this workflow.",
+        encoding="utf-8",
+    )
+    similar_command_skill = tmp_path / "skills" / "similar-command"
+    similar_command_skill.mkdir(parents=True)
+    (similar_command_skill / "SKILL.md").write_text(
+        "Run `uvx sample-extra --help` to use this workflow.",
+        encoding="utf-8",
+    )
+
+    assert SkillSearcher(tmp_path).infer_public_skills() == ["public"]
+
+
+def test_infer_public_skills_returns_empty_when_no_public_cli_commands_exist(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "sample"
+version = "0.1.0"
+""",
+        encoding="utf-8",
+    )
+    skill = tmp_path / "skills" / "skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("Run `uvx sample --help`.", encoding="utf-8")
+
+    assert SkillSearcher(tmp_path).infer_public_skills() == []
+
+
+@pytest.mark.parametrize("runner", ["uvx", "uv tool run"])
+def test_infer_public_skills_accepts_uv_cli_invocation_forms(tmp_path: Path, runner: str) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "sample"
+version = "0.1.0"
+
+[project.scripts]
+sample = "sample.cli:main"
+""",
+        encoding="utf-8",
+    )
+    skill = tmp_path / "skills" / "skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(f"Run `{runner} sample --help`.", encoding="utf-8")
+
+    assert SkillSearcher(tmp_path).infer_public_skills() == ["skill"]
