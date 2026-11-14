@@ -19,7 +19,7 @@ class PyconjuryStorage:
     @classmethod
     def from_storage_folder(cls, root_folder: Path | None = None) -> Self:
         if root_folder is None:
-            configured_root = os.environ.get("PYCONJURY_HOME", os.environ.get("MYSKILL_HOME"))
+            configured_root = os.environ.get("PYCONJURY_HOME")
             root_folder = Path(configured_root).expanduser() if configured_root else cls._default_storage_folder()
         return cls(root_folder=root_folder)
 

@@ -15,6 +15,7 @@ class PackageSkills(BaseModel, frozen=True):
 
     package_link: PackageLink
     skill_paths: Sequence[SkillPath]
+    package_name: str | None = None
 
     @classmethod
     def from_toml(cls, content: str) -> Self:
@@ -36,7 +37,7 @@ class PackageSkills(BaseModel, frozen=True):
         return cls.from_toml(content)
 
     def to_toml(self) -> str:
-        return tomli_w.dumps(self.model_dump(mode="json"))
+        return tomli_w.dumps(self.model_dump(mode="json", exclude_none=True))
 
     def write_toml_file(self, path: Path) -> None:
         try:

@@ -1,8 +1,12 @@
+import os
 import subprocess
 from pathlib import Path
 
 from pyconjury.infra.filesystem_link_creator.protocol import FileSystemLinkCreatorProtocol
-from pyconjury.infra.filesystem_link_creator.shared import _validate_directory_link
+from pyconjury.infra.filesystem_link_creator.shared import (
+    _validate_directory_link,
+    _validate_directory_link_for_removal,
+)
 
 
 class WindowsFileSystemLinkCreator(FileSystemLinkCreatorProtocol):
@@ -32,6 +36,17 @@ class WindowsFileSystemLinkCreator(FileSystemLinkCreatorProtocol):
 
     def validate_directory_link(self, source: Path, destination: Path) -> bool:
         return _validate_directory_link(source, destination)
+
+    def validate_directory_link_for_removal(self, source: Path, destination: Path) -> bool:
+        return _validate_directory_link_for_removal(source, destination)
+
+    def remove_directory_link(self, source: Path, destination: Path) -> None:
+        if not self.validate_directory_link_for_removal(source, destination):
+            return
+        if destination.is_junction():
+            os.rmdir(destination)
+        else:
+            destination.unlink()
 
     def create_file_link(self, source: Path, destination: Path) -> None:
         destination.symlink_to(source.resolve(strict=True))

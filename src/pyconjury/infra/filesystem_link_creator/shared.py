@@ -20,3 +20,19 @@ def _validate_directory_link(source: Path, destination: Path) -> bool:
             pass
 
     raise FileExistsError(f"Cannot create Skill link because the destination already exists: {destination}")
+
+
+def _validate_directory_link_for_removal(source: Path, destination: Path) -> bool:
+    if not os.path.lexists(destination):
+        return False
+
+    if not (destination.is_symlink() or destination.is_junction()):
+        raise FileExistsError(f"Cannot remove Skill link because the destination is not a directory link: {destination}")
+
+    try:
+        if destination.resolve(strict=False) == source.resolve(strict=False):
+            return True
+    except (OSError, RuntimeError) as error:
+        raise OSError(f"Cannot verify Skill link destination {destination}: {error}") from error
+
+    raise FileExistsError(f"Cannot remove Skill link because the destination points elsewhere: {destination}")
