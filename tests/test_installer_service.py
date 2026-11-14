@@ -153,6 +153,7 @@ def test_install_tool_passes_github_url_to_uv(monkeypatch) -> None:
         "--refresh",
         "git+https://github.com/example/sample.git",
     ]
+    assert calls[0][1]["errors"] == "replace"
 
 
 def test_install_tool_passes_local_path_to_uv(monkeypatch, tmp_path: Path) -> None:
@@ -200,9 +201,10 @@ def test_uninstall_removes_registered_skills_metadata_and_tool(monkeypatch, tmp_
     )
 
     target = str(project_folder) if identifier == "source" else "sample"
-    tool_removed = ConjuryInstallerService().uninstall(target)
+    tool_removed, removed_skill_names = ConjuryInstallerService().uninstall(target)
 
     assert tool_removed is True
+    assert removed_skill_names == ["public"]
     assert uninstalled_tools == ["sample"]
     assert removed_links == [(project_folder / "skills/public", tmp_path / "skills" / "public")]
     assert not package_file.exists()
@@ -236,9 +238,10 @@ def test_uninstall_by_package_name_removes_all_shared_registrations(monkeypatch,
         ),
     )
 
-    tool_removed = ConjuryInstallerService().uninstall("sample")
+    tool_removed, removed_skill_names = ConjuryInstallerService().uninstall("sample")
 
     assert tool_removed is True
+    assert removed_skill_names == ["one", "two"]
     assert uninstalled_tools == ["sample"]
     assert removed_links == [
         (project_folders[0] / "skills/one", tmp_path / "skills" / "one"),
@@ -270,7 +273,10 @@ def test_uninstall_by_package_name_supports_legacy_metadata(monkeypatch, tmp_pat
         ),
     )
 
-    assert ConjuryInstallerService().uninstall("legacy-name") is True
+    tool_removed, removed_skill_names = ConjuryInstallerService().uninstall("legacy-name")
+
+    assert tool_removed is True
+    assert removed_skill_names == ["public"]
     assert uninstalled_tools == ["legacy-name"]
     assert not package_file.exists()
 
@@ -309,9 +315,10 @@ def test_uninstall_by_source_keeps_tool_used_by_another_registration(monkeypatch
         ),
     )
 
-    tool_removed = ConjuryInstallerService().uninstall(str(project_folders[0]))
+    tool_removed, removed_skill_names = ConjuryInstallerService().uninstall(str(project_folders[0]))
 
     assert tool_removed is False
+    assert removed_skill_names == ["one"]
     assert removed_links == [(project_folders[0] / "skills/one", tmp_path / "skills" / "one")]
     assert not package_file.exists()
     assert other_package_file.exists()
@@ -361,3 +368,4 @@ def test_uninstall_tool_passes_package_name_to_uv(monkeypatch) -> None:
     _uninstall_tool("sample")
 
     assert calls[0][0] == ["uv", "tool", "uninstall", "sample"]
+    assert calls[0][1]["errors"] == "replace"

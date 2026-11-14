@@ -33,9 +33,9 @@ def test_uninstall_passes_package_name_to_installer(monkeypatch) -> None:
     received_packages: list[str] = []
 
     class FakeInstallerService:
-        def uninstall(self, package: str) -> bool:
+        def uninstall(self, package: str) -> tuple[bool, list[str]]:
             received_packages.append(package)
-            return True
+            return True, ["public"]
 
     monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
 
@@ -43,7 +43,20 @@ def test_uninstall_passes_package_name_to_installer(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert received_packages == ["sample"]
-    assert "Uninstalled sample" in result.output
+    assert result.output == "Uninstalled sample and removed its public Skills: public.\n"
+
+
+def test_uninstall_displays_removed_skills_when_tool_is_shared(monkeypatch) -> None:
+    class FakeInstallerService:
+        def uninstall(self, _package: str) -> tuple[bool, list[str]]:
+            return False, ["public"]
+
+    monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
+
+    result = CliRunner().invoke(main, ["uninstall", "sample"])
+
+    assert result.exit_code == 0
+    assert result.output == "Removed public Skills for sample: public; kept the uv tool used by another package.\n"
 
 
 def test_list_displays_packages_and_their_skills(monkeypatch, tmp_path: Path) -> None:
@@ -84,3 +97,46 @@ def test_list_filters_skills_by_package(monkeypatch) -> None:
     assert result.exit_code == 0
     assert received_packages == ["sample"]
     assert result.output.splitlines() == ["public"]
+
+
+def test_doctor_reports_consistent_installation(monkeypatch) -> None:
+    class FakeDoctorService:
+        def check(self, **_filters: str | None) -> list[str]:
+            return []
+
+    monkeypatch.setattr("pyconjury.cli.ConjuryDoctorService", FakeDoctorService)
+
+    result = CliRunner().invoke(main, ["doctor"])
+
+    assert result.exit_code == 0
+    assert result.output == "All registered packages and Skills are consistent.\n"
+
+
+def test_doctor_exits_nonzero_and_lists_issues(monkeypatch) -> None:
+    class FakeDoctorService:
+        def check(self, **_filters: str | None) -> list[str]:
+            return ["sample: Skill link is missing."]
+
+    monkeypatch.setattr("pyconjury.cli.ConjuryDoctorService", FakeDoctorService)
+
+    result = CliRunner().invoke(main, ["doctor"])
+
+    assert result.exit_code == 1
+    assert result.output == "Installation issues found:\n- sample: Skill link is missing.\n"
+
+
+def test_doctor_passes_package_and_skill_filters(monkeypatch) -> None:
+    received_filters = []
+
+    class FakeDoctorService:
+        def check(self, **filters: str | None) -> list[str]:
+            received_filters.append(filters)
+            return []
+
+    monkeypatch.setattr("pyconjury.cli.ConjuryDoctorService", FakeDoctorService)
+
+    result = CliRunner().invoke(main, ["doctor", "--package", "sample", "--skill", "public"])
+
+    assert result.exit_code == 0
+    assert received_filters == [{"package_name": "sample", "skill_name": "public"}]
+    assert result.output == "No issues found for the selected package and Skill.\n"

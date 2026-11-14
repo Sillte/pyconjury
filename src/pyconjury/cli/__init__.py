@@ -1,6 +1,7 @@
 import click
 
 from pyconjury.models.errors import PyConjuryError
+from pyconjury.services.doctor_service import ConjuryDoctorService
 from pyconjury.services.installer_service import ConjuryInstallerService
 
 
@@ -35,6 +36,30 @@ def list(package_name: str | None) -> None:
 
 
 @main.command()
+@click.option("--package", "package_name", help="Check only this installed Python project and its Skills.")
+@click.option("--skill", "skill_name", help="Check only this registered Skill.")
+def doctor(package_name: str | None, skill_name: str | None) -> None:
+    """Check registered packages, Skills, and installed CLI tools for inconsistencies."""
+    service = ConjuryDoctorService()
+    try:
+        issues = service.check(package_name=package_name, skill_name=skill_name)
+    except PyConjuryError as error:
+        raise click.ClickException(str(error)) from error
+
+    if not issues:
+        if package_name is None and skill_name is None:
+            click.echo("All registered packages and Skills are consistent.")
+        else:
+            click.echo("No issues found for the selected package and Skill.")
+        return
+
+    click.echo("Installation issues found:")
+    for issue in issues:
+        click.echo(f"- {issue}")
+    raise click.exceptions.Exit(1)
+
+
+@main.command()
 @click.argument("source")
 def install(source: str) -> None:
     """Install a package's public Skills and CLI tool from GitHub or a local path."""
@@ -54,11 +79,12 @@ def uninstall(package: str) -> None:
     """Uninstall a package by its GitHub URL, local path, or project name."""
     service = ConjuryInstallerService()
     try:
-        tool_removed = service.uninstall(package)
+        tool_removed, removed_skill_names = service.uninstall(package)
     except PyConjuryError as error:
         raise click.ClickException(str(error)) from error
 
+    skills = f": {', '.join(removed_skill_names)}" if removed_skill_names else ""
     if tool_removed:
-        click.echo(f"Uninstalled {package} and removed its public Skills.")
+        click.echo(f"Uninstalled {package} and removed its public Skills{skills}.")
     else:
-        click.echo(f"Removed public Skills for {package}; kept the uv tool used by another package.")
+        click.echo(f"Removed public Skills for {package}{skills}; kept the uv tool used by another package.")

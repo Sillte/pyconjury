@@ -13,6 +13,23 @@ pyconjury list --package project-name
 The first command lists installed Python projects and their public Skills.
 Use `--package` to list only the Skills registered by a project.
 
+## Doctor
+
+```console
+pyconjury doctor
+pyconjury doctor --package project-name
+pyconjury doctor --skill public-skill
+pyconjury doctor --package project-name --skill public-skill
+```
+
+Checks registration metadata, package source folders, registered Skill folders
+and links, and whether the corresponding CLI tools are installed with uv. The
+command reports each inconsistency and exits with a non-zero status if any are
+found. `--package` limits checks to that project and its Skills; `--skill`
+limits checks to that Skill's folder and link across installed projects.
+When both are provided, package-level checks run for the selected project,
+along with checks for only the selected Skill.
+
 ## Install
 
 ```console

@@ -59,7 +59,7 @@ class ConjuryInstallerService:
         storage = PyconjuryStorage.from_storage_folder()
         return self._install_package(storage, package_folder, LocalPackagePath(path=package_folder), package_folder)
 
-    def uninstall(self, target: str) -> bool:
+    def uninstall(self, target: str) -> tuple[bool, Sequence[str]]:
         storage = PyconjuryStorage.from_storage_folder()
         packages = [(name, storage.get_package_skills(name)) for name in storage.package_names]
         source_matches = [entry for entry in packages if _matches_package_source(target, entry[1].package_link)]
@@ -79,6 +79,15 @@ class ConjuryInstallerService:
 
         if not selected_packages:
             raise PyConjuryError(f"No installed package matches {target!r}.")
+
+        removed_skill_names = sorted(
+            (
+                skill_path.skill_name
+                for _, package in selected_packages
+                for skill_path in package.skill_paths
+            ),
+            key=str.casefold,
+        )
 
         package_names = {
             _read_package_name(_package_folder_for(storage, name, package))
@@ -132,7 +141,7 @@ class ConjuryInstallerService:
             except OSError as error:
                 raise PyConjuryError(f"Cannot remove package metadata {package_file}: {error}") from error
 
-        return not shared_package
+        return not shared_package, removed_skill_names
 
     def _install_package(
         self,
@@ -248,6 +257,7 @@ def _install_tool(source: str | Path) -> None:
             check=True,
             capture_output=True,
             text=True,
+            errors="replace",
             stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError as error:
@@ -264,6 +274,7 @@ def _uninstall_tool(package_name: str) -> None:
             check=True,
             capture_output=True,
             text=True,
+            errors="replace",
             stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError as error:
