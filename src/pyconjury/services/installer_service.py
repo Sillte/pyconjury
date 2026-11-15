@@ -1,6 +1,4 @@
-import re
 import subprocess
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -13,6 +11,8 @@ from pyconjury.models.package_skills import PackageSkills
 from pyconjury.models.storage import PyconjuryStorage
 from pyconjury.skill_searcher import SkillSearcher
 
+from .service_helpers import _agents_skills_folder, _read_package_name
+
 
 @dataclass(frozen=True)
 class _InstallPlan:
@@ -22,48 +22,7 @@ class _InstallPlan:
     links: tuple[tuple[Path, Path], ...]
 
 
-@dataclass(frozen=True)
-class _UninstallPlan:
-    package_name: str
-    shared_package: bool
-    removed_skill_names: Sequence[str]
-    links: tuple[tuple[Path, Path], ...]
-    package_files: tuple[Path, ...]
-
-
-@dataclass(frozen=True)
-class _RemoveSkillPlan:
-    package_skills: PackageSkills
-    package_file: Path
-    source: Path
-    destination: Path
-
-
-class ConjuryInstallerService:
-    def list_packages(self) -> Sequence[tuple[str, PackageSkills]]:
-        storage = PyconjuryStorage.from_storage_folder()
-        packages: list[tuple[str, PackageSkills]] = []
-        for package_key in storage.package_names:
-            package = storage.get_package_skills(package_key)
-            package_name = package.package_name or _read_package_name(
-                _package_folder_for(storage, package_key, package)
-            )
-            packages.append((package_name, package))
-        return sorted(packages, key=lambda entry: _normalize_package_name(entry[0]))
-
-    def list_skills(self, package_name: str) -> Sequence[SkillPath]:
-        packages = [
-            package
-            for registered_name, package in self.list_packages()
-            if _normalize_package_name(registered_name) == _normalize_package_name(package_name)
-        ]
-        if not packages:
-            raise PyConjuryError(f"No installed package matches {package_name!r}.")
-        return sorted(
-            (skill_path for package in packages for skill_path in package.skill_paths),
-            key=lambda skill_path: skill_path.skill_name.casefold(),
-        )
-
+class ConjuryInstallService:
     def install(self, source: str | Path) -> PackageSkills:
         if isinstance(source, Path):
             return self.install_local(source)
@@ -84,169 +43,6 @@ class ConjuryInstallerService:
             raise PyConjuryError(f"Local path is not a Python project with pyproject.toml: {package_folder}")
         storage = PyconjuryStorage.from_storage_folder()
         return self._install_package(storage, package_folder, LocalPackagePath(path=package_folder), package_folder)
-
-    def uninstall(self, target: str) -> tuple[bool, Sequence[str]]:
-        plan = self._prepare_uninstall(target)
-        self._execute_uninstall(plan)
-        return not plan.shared_package, plan.removed_skill_names
-
-    def remove_skill(self, skill_name: str) -> None:
-        plan = self._prepare_remove_skill(skill_name)
-        self._execute_remove_skill(plan)
-
-    def _prepare_remove_skill(self, skill_name: str) -> _RemoveSkillPlan:
-        storage = PyconjuryStorage.from_storage_folder()
-        matches: list[tuple[str, PackageSkills, SkillPath]] = []
-        for package_key in storage.package_names:
-            package = storage.get_package_skills(package_key)
-            for skill_path in package.skill_paths:
-                if skill_path.skill_name.casefold() == skill_name.casefold():
-                    matches.append((package_key, package, skill_path))
-        if not matches:
-            raise PyConjuryError(f"No installed Skill matches {skill_name!r}.")
-        if len(matches) > 1:
-            registrations = sorted(
-                {
-                    f"{package.package_name or _read_package_name(_package_folder_for(storage, package_key, package))} "
-                    f"({package_key})"
-                    for package_key, package, _ in matches
-                },
-                key=str.casefold,
-            )
-            raise PyConjuryError(
-                f"Multiple installed Skills match {skill_name!r}; resolve the duplicate registrations first "
-                f"({', '.join(registrations)})."
-            )
-
-        package_key, package, selected_skill = matches[0]
-        package_folder = _package_folder_for(storage, package_key, package)
-        remaining_skill_paths = [
-            skill_path for skill_path in package.skill_paths if skill_path != selected_skill
-        ]
-        updated_package = PackageSkills(
-            package_link=package.package_link,
-            skill_paths=remaining_skill_paths,
-            package_name=package.package_name,
-        )
-        source = package_folder / selected_skill.rel_path
-        destination = _agents_skills_folder() / selected_skill.skill_name
-        link_creator = create_default_file_system_link_creator()
-        try:
-            link_creator.validate_directory_link_for_removal(source, destination)
-        except OSError as error:
-            raise PyConjuryError(str(error)) from error
-
-        return _RemoveSkillPlan(
-            package_skills=updated_package,
-            package_file=storage.root_folder / f"{package_key}.toml",
-            source=source,
-            destination=destination,
-        )
-
-    def _execute_remove_skill(self, plan: _RemoveSkillPlan) -> None:
-        link_creator = create_default_file_system_link_creator()
-        try:
-            link_creator.remove_directory_link(plan.source, plan.destination)
-        except OSError as error:
-            raise PyConjuryError(str(error)) from error
-        plan.package_skills.write_toml_file(plan.package_file)
-
-    def _prepare_uninstall(self, target: str) -> _UninstallPlan:
-        storage = PyconjuryStorage.from_storage_folder()
-        packages = [(name, storage.get_package_skills(name)) for name in storage.package_names]
-        source_matches = [entry for entry in packages if _matches_package_source(target, entry[1].package_link)]
-        if len(source_matches) > 1:
-            package_names = sorted(
-                {
-                    package.package_name or _read_package_name(_package_folder_for(storage, name, package))
-                    for name, package in source_matches
-                },
-                key=str.casefold,
-            )
-            raise PyConjuryError(
-                f"Multiple installed packages match {target!r}; uninstall by package name instead "
-                f"({', '.join(package_names)})."
-            )
-
-        if source_matches:
-            selected_packages = source_matches
-        else:
-            selected_packages = []
-            for name, package in packages:
-                registered_name = package.package_name or _read_package_name(
-                    _package_folder_for(storage, name, package)
-                )
-                if _normalize_package_name(registered_name) == _normalize_package_name(target):
-                    selected_packages.append((name, package))
-
-        if not selected_packages:
-            raise PyConjuryError(f"No installed package matches {target!r}.")
-
-        removed_skill_names = sorted(
-            (skill_path.skill_name for _, package in selected_packages for skill_path in package.skill_paths),
-            key=str.casefold,
-        )
-
-        package_names = {
-            _read_package_name(_package_folder_for(storage, name, package))
-            if package.package_name is None
-            else package.package_name
-            for name, package in selected_packages
-        }
-        normalized_package_names = {_normalize_package_name(name) for name in package_names}
-        if len(normalized_package_names) != 1:
-            raise PyConjuryError(f"The selected registrations use different Python package names: {target!r}.")
-        package_name = next(iter(package_names))
-        selected_keys = {name for name, _ in selected_packages}
-        shared_package = False
-        for name, package in packages:
-            if name in selected_keys:
-                continue
-            other_package_name = package.package_name or _read_package_name(_package_folder_for(storage, name, package))
-            if _normalize_package_name(other_package_name) in normalized_package_names:
-                shared_package = True
-                break
-
-        link_creator = create_default_file_system_link_creator()
-        skills_folder = _agents_skills_folder()
-        links = [
-            (
-                _package_folder_for(storage, package_key, package) / skill_path.rel_path,
-                skills_folder / skill_path.skill_name,
-            )
-            for package_key, package in selected_packages
-            for skill_path in package.skill_paths
-        ]
-        for source, destination in links:
-            try:
-                link_creator.validate_directory_link_for_removal(source, destination)
-            except OSError as error:
-                raise PyConjuryError(str(error)) from error
-
-        return _UninstallPlan(
-            package_name=package_name,
-            shared_package=shared_package,
-            removed_skill_names=removed_skill_names,
-            links=tuple(links),
-            package_files=tuple(storage.root_folder / f"{package_key}.toml" for package_key, _ in selected_packages),
-        )
-
-    def _execute_uninstall(self, plan: _UninstallPlan) -> None:
-        if not plan.shared_package:
-            _uninstall_tool(plan.package_name)
-
-        link_creator = create_default_file_system_link_creator()
-        for source, destination in plan.links:
-            try:
-                link_creator.remove_directory_link(source, destination)
-            except OSError as error:
-                raise PyConjuryError(str(error)) from error
-
-        for package_file in plan.package_files:
-            try:
-                package_file.unlink()
-            except OSError as error:
-                raise PyConjuryError(f"Cannot remove package metadata {package_file}: {error}") from error
 
     def _install_package(
         self,
@@ -282,7 +78,9 @@ class ConjuryInstallerService:
         _check_skill_name_collisions(storage, package_file.stem, skill_paths)
 
         if storage.root_folder.exists() and not storage.root_folder.is_dir():
-            raise PyConjuryError(f"Cannot create package storage because the path is not a directory: {storage.root_folder}")
+            raise PyConjuryError(
+                f"Cannot create package storage because the path is not a directory: {storage.root_folder}"
+            )
 
         link_creator = create_default_file_system_link_creator()
         skills_folder = _agents_skills_folder()
@@ -321,43 +119,6 @@ class ConjuryInstallerService:
                 link_creator.create_directory_link(target, link_path)
             except OSError as error:
                 raise PyConjuryError(str(error)) from error
-
-
-def _agents_skills_folder() -> Path:
-    return Path.home() / ".agents" / "skills"
-
-
-def _matches_package_source(target: str, package_link: PackageLink) -> bool:
-    if isinstance(package_link, GithubPackageURL):
-        return target == package_link.url
-    return Path(target).expanduser().resolve() == package_link.path.expanduser().resolve()
-
-
-def _normalize_package_name(package_name: str) -> str:
-    return re.sub(r"[-_.]+", "-", package_name).casefold()
-
-
-def _package_folder_for(storage: PyconjuryStorage, package_key: str, package: PackageSkills) -> Path:
-    if isinstance(package.package_link, GithubPackageURL):
-        return storage.github_folder / package_key
-    return package.package_link.path
-
-
-def _read_package_name(package_folder: Path) -> str:
-    pyproject_path = package_folder / "pyproject.toml"
-    try:
-        with pyproject_path.open("rb") as pyproject_file:
-            metadata = tomllib.load(pyproject_file)
-    except OSError as error:
-        raise PyConjuryError(f"Cannot read Python project metadata {pyproject_path}: {error}") from error
-    except tomllib.TOMLDecodeError as error:
-        raise PyConjuryError(f"Invalid Python project metadata {pyproject_path}: {error}") from error
-
-    project = metadata.get("project")
-    package_name = project.get("name") if isinstance(project, dict) else None
-    if not isinstance(package_name, str) or not package_name.strip():
-        raise PyConjuryError(f"Python project must declare a non-empty [project].name in {pyproject_path}.")
-    return package_name.strip()
 
 
 def _check_existing_package_file(package_file: Path, package_skills: PackageSkills) -> None:
@@ -430,20 +191,3 @@ def _install_tool(source: str | Path) -> None:
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or "").strip()
         raise PyConjuryError(f"uv tool install failed: {detail or 'uv reported no details.'}") from error
-
-
-def _uninstall_tool(package_name: str) -> None:
-    try:
-        subprocess.run(
-            ["uv", "tool", "uninstall", package_name],
-            check=True,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            stdin=subprocess.DEVNULL,
-        )
-    except FileNotFoundError as error:
-        raise PyConjuryError("uv is required to uninstall the Python package but was not found.") from error
-    except subprocess.CalledProcessError as error:
-        detail = (error.stderr or error.stdout or "").strip()
-        raise PyConjuryError(f"uv tool uninstall failed: {detail or 'uv reported no details.'}") from error

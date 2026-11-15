@@ -19,7 +19,7 @@ def test_install_passes_local_path_to_installer(monkeypatch, tmp_path: Path) -> 
             received_sources.append(source)
             return package_skills
 
-    monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
+    monkeypatch.setattr("pyconjury.cli.ConjuryInstallService", FakeInstallerService)
 
     result = CliRunner().invoke(main, ["install", str(tmp_path)])
 
@@ -37,7 +37,7 @@ def test_uninstall_passes_source_to_installer(monkeypatch) -> None:
             received_sources.append(source)
             return True, ["public"]
 
-    monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
+    monkeypatch.setattr("pyconjury.cli.ConjuryUninstallService", FakeInstallerService)
 
     result = CliRunner().invoke(main, ["uninstall", "sample"])
 
@@ -58,7 +58,7 @@ def test_uninstall_displays_removed_skills_when_tool_is_shared(monkeypatch) -> N
         def uninstall(self, _source: str) -> tuple[bool, list[str]]:
             return False, ["public"]
 
-    monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
+    monkeypatch.setattr("pyconjury.cli.ConjuryUninstallService", FakeInstallerService)
 
     result = CliRunner().invoke(main, ["uninstall", "sample"])
 
@@ -73,7 +73,7 @@ def test_skill_remove_passes_skill_name_to_installer(monkeypatch) -> None:
         def remove_skill(self, skill_name: str) -> None:
             removed_skills.append(skill_name)
 
-    monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
+    monkeypatch.setattr("pyconjury.cli.ConjuryRemoveSkillService", FakeInstallerService)
 
     result = CliRunner().invoke(main, ["skill", "remove", "public"])
 
@@ -96,7 +96,7 @@ def test_list_displays_packages_and_their_skills(monkeypatch, tmp_path: Path) ->
         def list_packages(self) -> list[tuple[str, PackageSkills]]:
             return [("sample", package_skills)]
 
-    monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
+    monkeypatch.setattr("pyconjury.cli.ConjuryPackageQueryService", FakeInstallerService)
 
     result = CliRunner().invoke(main, ["list"])
 
@@ -113,7 +113,7 @@ def test_list_filters_skills_by_package(monkeypatch) -> None:
             received_packages.append(package_name)
             return skill_paths
 
-    monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
+    monkeypatch.setattr("pyconjury.cli.ConjuryPackageQueryService", FakeInstallerService)
 
     result = CliRunner().invoke(main, ["list", "--package", "sample"])
 

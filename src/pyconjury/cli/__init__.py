@@ -1,8 +1,13 @@
 import click
 
 from pyconjury.models.errors import PyConjuryError
-from pyconjury.services.doctor_service import ConjuryDoctorService
-from pyconjury.services.installer_service import ConjuryInstallerService
+from pyconjury.services import (
+    ConjuryDoctorService,
+    ConjuryInstallService,
+    ConjuryPackageQueryService,
+    ConjuryRemoveSkillService,
+    ConjuryUninstallService,
+)
 
 
 @click.group()
@@ -14,7 +19,7 @@ def main() -> None:
 @click.option("--package", "package_name", help="Show Skills for this installed Python project.")
 def list(package_name: str | None) -> None:
     """List installed packages and their public Skills."""
-    service = ConjuryInstallerService()
+    service = ConjuryPackageQueryService()
     try:
         if package_name is not None:
             skills = service.list_skills(package_name)
@@ -63,7 +68,7 @@ def doctor(package_name: str | None, skill_name: str | None) -> None:
 @click.argument("source")
 def install(source: str) -> None:
     """Install a package's public Skills and CLI tool from GitHub or a local path."""
-    service = ConjuryInstallerService()
+    service = ConjuryInstallService()
     try:
         package_skills = service.install(source)
     except PyConjuryError as error:
@@ -77,7 +82,7 @@ def install(source: str) -> None:
 @click.argument("source")
 def uninstall(source: str) -> None:
     """Uninstall a package by its GitHub URL, local path, or project name."""
-    service = ConjuryInstallerService()
+    service = ConjuryUninstallService()
     try:
         tool_removed, removed_skill_names = service.uninstall(source)
     except PyConjuryError as error:
@@ -99,7 +104,7 @@ def skill() -> None:
 @click.argument("skill_name")
 def remove_skill(skill_name: str) -> None:
     """Remove a Skill registration while keeping its Python package installed."""
-    service = ConjuryInstallerService()
+    service = ConjuryRemoveSkillService()
     try:
         service.remove_skill(skill_name)
     except PyConjuryError as error:

@@ -7,7 +7,10 @@ from pyconjury.models.errors import PyConjuryError
 from pyconjury.models.links import GithubPackageURL, LocalPackagePath, SkillPath
 from pyconjury.models.package_skills import PackageSkills
 from pyconjury.services.doctor_service import ConjuryDoctorService
-from pyconjury.services.installer_service import ConjuryInstallerService
+from pyconjury.services.installer_service import ConjuryInstallService
+from pyconjury.services.package_query_service import ConjuryPackageQueryService
+from pyconjury.services.remove_skill_service import ConjuryRemoveSkillService
+from pyconjury.services.uninstall_service import ConjuryUninstallService, _uninstall_tool
 
 
 def create_public_repository(repository_folder: Path) -> None:
@@ -57,7 +60,7 @@ def test_install_github_registers_public_skills_and_creates_links(monkeypatch, t
         ),
     )
 
-    result = ConjuryInstallerService().install("https://github.com/example/sample-repo")
+    result = ConjuryInstallService().install("https://github.com/example/sample-repo")
 
     assert result.package_link == GithubPackageURL(url="https://github.com/example/sample-repo")
     assert result.package_name == "sample"
@@ -86,7 +89,7 @@ def test_install_github_rejects_repositories_without_public_skills(monkeypatch, 
     )
 
     with pytest.raises(PyConjuryError, match="No public Skills"):
-        ConjuryInstallerService().install_github("https://github.com/example/private-repo")
+        ConjuryInstallService().install_github("https://github.com/example/private-repo")
 
     assert not list((tmp_path / "pyconjury").glob("*.toml"))
 
@@ -111,7 +114,7 @@ def test_install_local_python_project_registers_public_skills(monkeypatch, tmp_p
         ),
     )
 
-    result = ConjuryInstallerService().install(str(project_folder))
+    result = ConjuryInstallService().install(str(project_folder))
 
     assert result.package_link == LocalPackagePath(path=project_folder.resolve())
     assert result.package_name == "sample"
@@ -141,7 +144,7 @@ def test_install_rejects_a_skill_name_registered_by_another_package(monkeypatch,
     )
 
     with pytest.raises(PyConjuryError, match="already registered"):
-        ConjuryInstallerService().install(str(project_folder))
+        ConjuryInstallService().install(str(project_folder))
 
     assert not (storage_folder / "new-project.toml").exists()
 
@@ -169,7 +172,7 @@ def test_install_failure_leaves_registration_for_doctor_to_report(monkeypatch, t
     )
 
     with pytest.raises(PyConjuryError, match="install failed"):
-        ConjuryInstallerService().install(str(project_folder))
+        ConjuryInstallService().install(str(project_folder))
 
     issues = ConjuryDoctorService().check()
 
@@ -186,7 +189,7 @@ def test_install_local_rejects_paths_without_pyproject(monkeypatch, tmp_path: Pa
     )
 
     with pytest.raises(PyConjuryError, match="pyproject.toml"):
-        ConjuryInstallerService().install(str(project_folder))
+        ConjuryInstallService().install(str(project_folder))
 
 
 def test_install_tool_passes_github_url_to_uv(monkeypatch) -> None:
@@ -243,13 +246,13 @@ def test_uninstall_removes_registered_skills_metadata_and_tool(monkeypatch, tmp_
     removed_links: list[tuple[Path, Path]] = []
     uninstalled_tools: list[str] = []
     monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
-    monkeypatch.setattr("pyconjury.services.installer_service._agents_skills_folder", lambda: tmp_path / "skills")
+    monkeypatch.setattr("pyconjury.services.uninstall_service._agents_skills_folder", lambda: tmp_path / "skills")
     monkeypatch.setattr(
-        "pyconjury.services.installer_service._uninstall_tool",
+        "pyconjury.services.uninstall_service._uninstall_tool",
         uninstalled_tools.append,
     )
     monkeypatch.setattr(
-        "pyconjury.services.installer_service.create_default_file_system_link_creator",
+        "pyconjury.services.uninstall_service.create_default_file_system_link_creator",
         lambda: SimpleNamespace(
             validate_directory_link_for_removal=lambda _source, _destination: True,
             remove_directory_link=lambda source, destination: removed_links.append((source, destination)),
@@ -257,7 +260,7 @@ def test_uninstall_removes_registered_skills_metadata_and_tool(monkeypatch, tmp_
     )
 
     target = str(project_folder) if identifier == "source" else "sample"
-    tool_removed, removed_skill_names = ConjuryInstallerService().uninstall(target)
+    tool_removed, removed_skill_names = ConjuryUninstallService().uninstall(target)
 
     assert tool_removed is True
     assert removed_skill_names == ["public"]
@@ -284,17 +287,17 @@ def test_uninstall_by_package_name_removes_all_shared_registrations(monkeypatch,
     removed_links: list[tuple[Path, Path]] = []
     uninstalled_tools: list[str] = []
     monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
-    monkeypatch.setattr("pyconjury.services.installer_service._agents_skills_folder", lambda: tmp_path / "skills")
-    monkeypatch.setattr("pyconjury.services.installer_service._uninstall_tool", uninstalled_tools.append)
+    monkeypatch.setattr("pyconjury.services.uninstall_service._agents_skills_folder", lambda: tmp_path / "skills")
+    monkeypatch.setattr("pyconjury.services.uninstall_service._uninstall_tool", uninstalled_tools.append)
     monkeypatch.setattr(
-        "pyconjury.services.installer_service.create_default_file_system_link_creator",
+        "pyconjury.services.uninstall_service.create_default_file_system_link_creator",
         lambda: SimpleNamespace(
             validate_directory_link_for_removal=lambda _source, _destination: True,
             remove_directory_link=lambda source, destination: removed_links.append((source, destination)),
         ),
     )
 
-    tool_removed, removed_skill_names = ConjuryInstallerService().uninstall("sample")
+    tool_removed, removed_skill_names = ConjuryUninstallService().uninstall("sample")
 
     assert tool_removed is True
     assert removed_skill_names == ["one", "two"]
@@ -322,7 +325,7 @@ def test_uninstall_by_source_lists_package_names_when_source_matches_multiple_re
     monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
 
     with pytest.raises(PyConjuryError) as error:
-        ConjuryInstallerService().uninstall(str(project_folder))
+        ConjuryUninstallService().uninstall(str(project_folder))
 
     assert "sample-a, sample-b" in str(error.value)
 
@@ -340,17 +343,17 @@ def test_uninstall_by_package_name_supports_legacy_metadata(monkeypatch, tmp_pat
     ).write_toml_file(package_file)
     uninstalled_tools: list[str] = []
     monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
-    monkeypatch.setattr("pyconjury.services.installer_service._agents_skills_folder", lambda: tmp_path / "skills")
-    monkeypatch.setattr("pyconjury.services.installer_service._uninstall_tool", uninstalled_tools.append)
+    monkeypatch.setattr("pyconjury.services.uninstall_service._agents_skills_folder", lambda: tmp_path / "skills")
+    monkeypatch.setattr("pyconjury.services.uninstall_service._uninstall_tool", uninstalled_tools.append)
     monkeypatch.setattr(
-        "pyconjury.services.installer_service.create_default_file_system_link_creator",
+        "pyconjury.services.uninstall_service.create_default_file_system_link_creator",
         lambda: SimpleNamespace(
             validate_directory_link_for_removal=lambda _source, _destination: False,
             remove_directory_link=lambda _source, _destination: None,
         ),
     )
 
-    tool_removed, removed_skill_names = ConjuryInstallerService().uninstall("legacy-name")
+    tool_removed, removed_skill_names = ConjuryUninstallService().uninstall("legacy-name")
 
     assert tool_removed is True
     assert removed_skill_names == ["public"]
@@ -379,20 +382,20 @@ def test_uninstall_by_source_keeps_tool_used_by_another_registration(monkeypatch
 
     removed_links: list[tuple[Path, Path]] = []
     monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
-    monkeypatch.setattr("pyconjury.services.installer_service._agents_skills_folder", lambda: tmp_path / "skills")
+    monkeypatch.setattr("pyconjury.services.uninstall_service._agents_skills_folder", lambda: tmp_path / "skills")
     monkeypatch.setattr(
-        "pyconjury.services.installer_service._uninstall_tool",
+        "pyconjury.services.uninstall_service._uninstall_tool",
         lambda _name: pytest.fail("shared uv tool should be kept"),
     )
     monkeypatch.setattr(
-        "pyconjury.services.installer_service.create_default_file_system_link_creator",
+        "pyconjury.services.uninstall_service.create_default_file_system_link_creator",
         lambda: SimpleNamespace(
             validate_directory_link_for_removal=lambda _source, _destination: True,
             remove_directory_link=lambda source, destination: removed_links.append((source, destination)),
         ),
     )
 
-    tool_removed, removed_skill_names = ConjuryInstallerService().uninstall(str(project_folders[0]))
+    tool_removed, removed_skill_names = ConjuryUninstallService().uninstall(str(project_folders[0]))
 
     assert tool_removed is False
     assert removed_skill_names == ["one"]
@@ -424,20 +427,20 @@ def test_remove_skill_keeps_package_and_tool_when_last_skill_is_removed(monkeypa
     removed_links: list[tuple[Path, Path]] = []
     skills_folder = tmp_path / "agents" / "skills"
     monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
-    monkeypatch.setattr("pyconjury.services.installer_service._agents_skills_folder", lambda: skills_folder)
+    monkeypatch.setattr("pyconjury.services.remove_skill_service._agents_skills_folder", lambda: skills_folder)
     monkeypatch.setattr(
-        "pyconjury.services.installer_service._uninstall_tool",
+        "pyconjury.services.uninstall_service._uninstall_tool",
         lambda _name: pytest.fail("the package tool should remain installed"),
     )
     monkeypatch.setattr(
-        "pyconjury.services.installer_service.create_default_file_system_link_creator",
+        "pyconjury.services.remove_skill_service.create_default_file_system_link_creator",
         lambda: SimpleNamespace(
             validate_directory_link_for_removal=lambda _source, _destination: True,
             remove_directory_link=lambda source, destination: removed_links.append((source, destination)),
         ),
     )
 
-    service = ConjuryInstallerService()
+    service = ConjuryRemoveSkillService()
     service.remove_skill("public")
 
     remaining_package = PackageSkills.from_toml_file(package_file)
@@ -483,7 +486,7 @@ def test_list_packages_and_skills_use_registered_project_names(monkeypatch, tmp_
     ).write_toml_file(storage_folder / "project-b.toml")
     monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
 
-    service = ConjuryInstallerService()
+    service = ConjuryPackageQueryService()
 
     assert [name for name, _ in service.list_packages()] == ["other", "Sample_Package"]
     assert [skill.skill_name for skill in service.list_skills("sample-package")] == ["first"]
@@ -493,7 +496,7 @@ def test_list_skills_rejects_unknown_package(monkeypatch, tmp_path: Path) -> Non
     monkeypatch.setenv("PYCONJURY_HOME", str(tmp_path / "empty-storage"))
 
     with pytest.raises(PyConjuryError, match="No installed package"):
-        ConjuryInstallerService().list_skills("missing")
+        ConjuryPackageQueryService().list_skills("missing")
 
 
 def test_uninstall_tool_passes_package_name_to_uv(monkeypatch) -> None:
@@ -502,9 +505,7 @@ def test_uninstall_tool_passes_package_name_to_uv(monkeypatch) -> None:
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
 
-    monkeypatch.setattr("pyconjury.services.installer_service.subprocess.run", fake_run)
-
-    from pyconjury.services.installer_service import _uninstall_tool
+    monkeypatch.setattr("pyconjury.services.uninstall_service.subprocess.run", fake_run)
 
     _uninstall_tool("sample")
 
