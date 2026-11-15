@@ -43,7 +43,7 @@ class ConjuryDoctorService:
                 for skill_path in package.skill_paths
                 if skill_name is None or skill_path.skill_name.casefold() == skill_name.casefold()
             ]
-            if selected_skills:
+            if selected_skills or skill_name is None:
                 selected_packages.append((package_file, package, selected_skills))
 
         if skill_name is not None and not selected_packages:

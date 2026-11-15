@@ -74,17 +74,34 @@ def install(source: str) -> None:
 
 
 @main.command()
-@click.argument("package")
-def uninstall(package: str) -> None:
+@click.argument("source")
+def uninstall(source: str) -> None:
     """Uninstall a package by its GitHub URL, local path, or project name."""
     service = ConjuryInstallerService()
     try:
-        tool_removed, removed_skill_names = service.uninstall(package)
+        tool_removed, removed_skill_names = service.uninstall(source)
     except PyConjuryError as error:
         raise click.ClickException(str(error)) from error
 
     skills = f": {', '.join(removed_skill_names)}" if removed_skill_names else ""
     if tool_removed:
-        click.echo(f"Uninstalled {package} and removed its public Skills{skills}.")
+        click.echo(f"Uninstalled {source} and removed its public Skills{skills}.")
     else:
-        click.echo(f"Removed public Skills for {package}{skills}; kept the uv tool used by another package.")
+        click.echo(f"Removed public Skills for {source}{skills}; kept the uv tool used by another package.")
+
+
+@main.group()
+def skill() -> None:
+    """Manage installed public Skills."""
+
+
+@skill.command("remove")
+@click.argument("skill_name")
+def remove_skill(skill_name: str) -> None:
+    """Remove a Skill registration while keeping its Python package installed."""
+    service = ConjuryInstallerService()
+    try:
+        service.remove_skill(skill_name)
+    except PyConjuryError as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(f"Removed Skill {skill_name}.")

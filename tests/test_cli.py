@@ -29,12 +29,12 @@ def test_install_passes_local_path_to_installer(monkeypatch, tmp_path: Path) -> 
     assert "public" in result.output
 
 
-def test_uninstall_passes_package_name_to_installer(monkeypatch) -> None:
-    received_packages: list[str] = []
+def test_uninstall_passes_source_to_installer(monkeypatch) -> None:
+    received_sources: list[str] = []
 
     class FakeInstallerService:
-        def uninstall(self, package: str) -> tuple[bool, list[str]]:
-            received_packages.append(package)
+        def uninstall(self, source: str) -> tuple[bool, list[str]]:
+            received_sources.append(source)
             return True, ["public"]
 
     monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
@@ -42,13 +42,20 @@ def test_uninstall_passes_package_name_to_installer(monkeypatch) -> None:
     result = CliRunner().invoke(main, ["uninstall", "sample"])
 
     assert result.exit_code == 0
-    assert received_packages == ["sample"]
+    assert received_sources == ["sample"]
     assert result.output == "Uninstalled sample and removed its public Skills: public.\n"
+
+
+def test_uninstall_help_uses_source_as_argument_name() -> None:
+    result = CliRunner().invoke(main, ["uninstall", "--help"])
+
+    assert result.exit_code == 0
+    assert "SOURCE" in result.output
 
 
 def test_uninstall_displays_removed_skills_when_tool_is_shared(monkeypatch) -> None:
     class FakeInstallerService:
-        def uninstall(self, _package: str) -> tuple[bool, list[str]]:
+        def uninstall(self, _source: str) -> tuple[bool, list[str]]:
             return False, ["public"]
 
     monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
@@ -57,6 +64,22 @@ def test_uninstall_displays_removed_skills_when_tool_is_shared(monkeypatch) -> N
 
     assert result.exit_code == 0
     assert result.output == "Removed public Skills for sample: public; kept the uv tool used by another package.\n"
+
+
+def test_skill_remove_passes_skill_name_to_installer(monkeypatch) -> None:
+    removed_skills: list[str] = []
+
+    class FakeInstallerService:
+        def remove_skill(self, skill_name: str) -> None:
+            removed_skills.append(skill_name)
+
+    monkeypatch.setattr("pyconjury.cli.ConjuryInstallerService", FakeInstallerService)
+
+    result = CliRunner().invoke(main, ["skill", "remove", "public"])
+
+    assert result.exit_code == 0
+    assert removed_skills == ["public"]
+    assert result.output == "Removed Skill public.\n"
 
 
 def test_list_displays_packages_and_their_skills(monkeypatch, tmp_path: Path) -> None:

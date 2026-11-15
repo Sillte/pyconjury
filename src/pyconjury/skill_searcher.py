@@ -3,14 +3,11 @@ import tomllib
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from pyconjury.models.errors import PyConjuryError
 from pyconjury.models.links import SkillPath
 
 
 class SkillSearcher:
-    """
-    This class assumes that the skills with the same name do not exist.
-    """
-
     def __init__(self, package_folder: Path) -> None:
         self._package_folder = package_folder
         self._name_to_folder = self._construct_skill_paths()
@@ -20,11 +17,20 @@ class SkillSearcher:
         return self._package_folder
 
     def _construct_skill_paths(self) -> Mapping[str, Path]:
-        return {path.parent.name: path for path in self._package_folder.glob("**/SKILL.md")}
+        name_to_folder: dict[str, Path] = {}
+        for skill_file in self._package_folder.glob("**/SKILL.md"):
+            skill_name = skill_file.parent.name
+            normalized_name = skill_name.casefold()
+            if normalized_name in name_to_folder:
+                raise PyConjuryError(
+                    f"Multiple Skills named {skill_name!r} were found in {self._package_folder}."
+                )
+            name_to_folder[normalized_name] = skill_file
+        return name_to_folder
 
     @property
     def skills(self) -> Sequence[str]:
-        return sorted(self._name_to_folder.keys())
+        return sorted((path.parent.name for path in self._name_to_folder.values()), key=str.casefold)
 
     def infer_public_skills(self) -> Sequence[str]:
         return [skill_path.skill_name for skill_path in self.infer_public_skill_paths()]
@@ -33,7 +39,7 @@ class SkillSearcher:
         cli_commands = self.get_cli_commands()
         return [
             SkillPath(rel_path=skill_file.parent.relative_to(self._package_folder))
-            for _, skill_file in sorted(self._name_to_folder.items())
+            for skill_file in sorted(self._name_to_folder.values(), key=lambda path: path.parent.name.casefold())
             if self._infer_is_public_skill(skill_file, cli_commands)
         ]
 

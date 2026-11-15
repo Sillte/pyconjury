@@ -51,6 +51,24 @@ registrations use the same project name, uninstalling by project name removes
 all of them; uninstalling one source keeps the shared uv tool while another
 registration still uses it.
 
+## Remove a Skill
+
+```console
+pyconjury skill remove public-skill
+```
+
+This removes only the Skill link and its registration entry. The package
+registration and uv tool remain installed, even when it was the package's last
+Skill. `pyconjury doctor` continues to check the package and uv tool.
+
+Skill names must be unique within a package and across installed registrations,
+ignoring case.
+Before installing the tool or changing Skill links or registration metadata,
+installation checks package metadata, Skill names, and link destinations. If an
+error occurs during execution, the registration metadata is kept where possible
+so `pyconjury doctor` can report incomplete state; use its findings to repair
+the installation manually.
+
 The Python project must have a `[project.scripts]` table in `pyproject.toml`.
 A `SKILL.md` is treated as public when it invokes one of those commands using
 `uvx <command>` or `uv tool run <command>`.

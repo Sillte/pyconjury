@@ -2,7 +2,17 @@ from pathlib import Path
 
 import pytest
 
+from pyconjury.models.errors import PyConjuryError
 from pyconjury.skill_searcher import SkillSearcher
+
+
+def test_skill_searcher_rejects_duplicate_skill_names_within_a_package(tmp_path: Path) -> None:
+    for skill_path in (tmp_path / "first" / "sample", tmp_path / "second" / "sample"):
+        skill_path.mkdir(parents=True)
+        (skill_path / "SKILL.md").write_text("Private Skill.", encoding="utf-8")
+
+    with pytest.raises(PyConjuryError, match="Multiple Skills named"):
+        SkillSearcher(tmp_path)
 
 
 def test_get_cli_commands_reads_project_scripts(tmp_path: Path) -> None:
