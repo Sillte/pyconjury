@@ -20,29 +20,31 @@ class _InstallPlan:
     package_file: Path
     install_source: str | Path
     links: tuple[tuple[Path, Path], ...]
+    links_to_remove: tuple[tuple[Path, Path], ...]
+    force: bool
 
 
 class ConjuryInstallService:
-    def install(self, source: str | Path) -> PackageSkills:
+    def install(self, source: str | Path, *, force: bool = False) -> PackageSkills:
         if isinstance(source, Path):
-            return self.install_local(source)
+            return self.install_local(source, force=force)
         if _is_github_source(source):
-            return self.install_github(source)
-        return self.install_local(Path(source))
+            return self.install_github(source, force=force)
+        return self.install_local(Path(source), force=force)
 
-    def install_github(self, url: str) -> PackageSkills:
+    def install_github(self, url: str, *, force: bool = False) -> PackageSkills:
         storage = PyconjuryStorage.from_storage_folder()
         repository_folder = storage.github_storage.fetch(url, update=True)
-        return self._install_package(storage, repository_folder, GithubPackageURL(url=url), url)
+        return self._install_package(storage, repository_folder, GithubPackageURL(url=url), url, force)
 
-    def install_local(self, path: Path) -> PackageSkills:
+    def install_local(self, path: Path, *, force: bool = False) -> PackageSkills:
         package_folder = path.expanduser().resolve()
         if not package_folder.is_dir():
             raise PyConjuryError(f"Local Python project directory does not exist: {package_folder}")
         if not (package_folder / "pyproject.toml").is_file():
             raise PyConjuryError(f"Local path is not a Python project with pyproject.toml: {package_folder}")
         storage = PyconjuryStorage.from_storage_folder()
-        return self._install_package(storage, package_folder, LocalPackagePath(path=package_folder), package_folder)
+        return self._install_package(storage, package_folder, LocalPackagePath(path=package_folder), package_folder, force)
 
     def _install_package(
         self,
@@ -50,8 +52,9 @@ class ConjuryInstallService:
         package_folder: Path,
         package_link: PackageLink,
         install_source: str | Path,
+        force: bool,
     ) -> PackageSkills:
-        plan = self._prepare_install(storage, package_folder, package_link, install_source)
+        plan = self._prepare_install(storage, package_folder, package_link, install_source, force)
         self._execute_install(storage, plan)
         return plan.package_skills
 
@@ -61,6 +64,7 @@ class ConjuryInstallService:
         package_folder: Path,
         package_link: PackageLink,
         install_source: str | Path,
+        force: bool,
     ) -> _InstallPlan:
         searcher = SkillSearcher(package_folder)
         skill_paths = searcher.infer_public_skill_paths()
@@ -74,7 +78,7 @@ class ConjuryInstallService:
             package_name=package_name,
         )
         package_file = storage.root_folder / f"{package_folder.name}.toml"
-        _check_existing_package_file(package_file, package_skills)
+        existing_package = _check_existing_package_file(package_file, package_skills)
         _check_skill_name_collisions(storage, package_file.stem, skill_paths)
 
         if storage.root_folder.exists() and not storage.root_folder.is_dir():
@@ -84,6 +88,19 @@ class ConjuryInstallService:
 
         link_creator = create_default_file_system_link_creator()
         skills_folder = _agents_skills_folder()
+        links_to_remove: list[tuple[Path, Path]] = []
+        if force and existing_package is not None:
+            for existing_skill in existing_package.skill_paths:
+                source = package_folder / existing_skill.rel_path
+                destination = skills_folder / existing_skill.skill_name
+                try:
+                    link_exists = link_creator.validate_directory_link_for_removal(source, destination)
+                except OSError as error:
+                    raise PyConjuryError(str(error)) from error
+                if link_exists:
+                    links_to_remove.append((source, destination))
+
+        replaceable_destinations = {destination for _, destination in links_to_remove}
         links = tuple(
             (
                 package_folder / skill_path.rel_path,
@@ -92,6 +109,12 @@ class ConjuryInstallService:
             for skill_path in skill_paths
         )
         for target, link_path in links:
+            if link_path in replaceable_destinations:
+                try:
+                    target.resolve(strict=True)
+                except OSError as error:
+                    raise PyConjuryError(f"Cannot create Skill link because its target is unavailable: {target}") from error
+                continue
             try:
                 link_creator.validate_directory_link(target, link_path)
             except OSError as error:
@@ -102,6 +125,8 @@ class ConjuryInstallService:
             package_file=package_file,
             install_source=install_source,
             links=links,
+            links_to_remove=tuple(links_to_remove),
+            force=force,
         )
 
     def _execute_install(self, storage: PyconjuryStorage, plan: _InstallPlan) -> None:
@@ -110,10 +135,20 @@ class ConjuryInstallService:
         except OSError as error:
             raise PyConjuryError(f"Cannot create package storage {storage.root_folder}: {error}") from error
 
-        plan.package_skills.write_toml_file(plan.package_file)
+        if not plan.force:
+            plan.package_skills.write_toml_file(plan.package_file)
         _install_tool(plan.install_source)
 
         link_creator = create_default_file_system_link_creator()
+        for source, link_path in plan.links_to_remove:
+            try:
+                link_creator.remove_directory_link(source, link_path)
+            except OSError as error:
+                raise PyConjuryError(str(error)) from error
+
+        if plan.force:
+            plan.package_skills.write_toml_file(plan.package_file)
+
         for target, link_path in plan.links:
             try:
                 link_creator.create_directory_link(target, link_path)
@@ -121,13 +156,14 @@ class ConjuryInstallService:
                 raise PyConjuryError(str(error)) from error
 
 
-def _check_existing_package_file(package_file: Path, package_skills: PackageSkills) -> None:
+def _check_existing_package_file(package_file: Path, package_skills: PackageSkills) -> PackageSkills | None:
     if not package_file.exists():
-        return
+        return None
 
     existing_package = PackageSkills.from_toml_file(package_file)
     if existing_package.package_link != package_skills.package_link:
         raise PyConjuryError(f"Cannot replace package metadata for a different package source: {package_file}")
+    return existing_package
 
 
 def _check_skill_name_collisions(

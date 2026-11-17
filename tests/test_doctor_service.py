@@ -209,3 +209,135 @@ def test_check_reports_when_filter_matches_nothing(
     monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
 
     assert ConjuryDoctorService().check(**filters) == [expected_issue]
+
+
+def test_prune_dry_run_lists_broken_skill_without_changing_registration(monkeypatch, tmp_path: Path) -> None:
+    storage_folder = tmp_path / "storage"
+    storage_folder.mkdir()
+    package_folder = tmp_path / "package"
+    create_registered_package(storage_folder, package_folder)
+    (package_folder / "skills" / "public" / "SKILL.md").unlink()
+    monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
+    monkeypatch.setattr("pyconjury.services.doctor_service._agents_skills_folder", lambda: tmp_path / "skills")
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.create_default_file_system_link_creator",
+        lambda: SimpleNamespace(validate_directory_link_for_removal=lambda _source, _destination: False),
+    )
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="sample v1.0.0\n"),
+    )
+    package_file = storage_folder / "sample.toml"
+    original_package = PackageSkills.from_toml_file(package_file)
+
+    actions, issues = ConjuryDoctorService().prune(dry_run=True)
+
+    assert actions == ["Would remove broken Skill 'public' from package 'sample'."]
+    assert any("SKILL.md is missing" in issue for issue in issues)
+    assert PackageSkills.from_toml_file(package_file) == original_package
+
+
+def test_prune_removes_broken_skill_registration_and_safe_link(monkeypatch, tmp_path: Path) -> None:
+    storage_folder = tmp_path / "storage"
+    storage_folder.mkdir()
+    package_folder = tmp_path / "package"
+    create_registered_package(storage_folder, package_folder)
+    (package_folder / "skills" / "public" / "SKILL.md").unlink()
+    monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
+    skills_folder = tmp_path / "skills"
+    monkeypatch.setattr("pyconjury.services.doctor_service._agents_skills_folder", lambda: skills_folder)
+    removed_links: list[tuple[Path, Path]] = []
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.create_default_file_system_link_creator",
+        lambda: SimpleNamespace(
+            validate_directory_link_for_removal=lambda _source, _destination: True,
+            remove_directory_link=lambda source, destination: removed_links.append((source, destination)),
+        ),
+    )
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="sample v1.0.0\n"),
+    )
+
+    actions, issues = ConjuryDoctorService().prune()
+
+    assert actions == ["Removed broken Skill 'public' from package 'sample'."]
+    assert issues == []
+    assert removed_links == [(package_folder / "skills/public", skills_folder / "public")]
+    assert PackageSkills.from_toml_file(storage_folder / "sample.toml").skill_paths == []
+    assert package_folder.is_dir()
+
+
+def test_prune_removes_missing_package_registration_but_keeps_source_folder(monkeypatch, tmp_path: Path) -> None:
+    storage_folder = tmp_path / "storage"
+    storage_folder.mkdir()
+    package_folder = tmp_path / "package"
+    package_folder.mkdir()
+    sentinel = package_folder / "keep.txt"
+    sentinel.write_text("preserve", encoding="utf-8")
+    package_file = storage_folder / "sample.toml"
+    PackageSkills(
+        package_link=LocalPackagePath(path=package_folder.resolve()),
+        skill_paths=[SkillPath(rel_path=Path("skills/public"))],
+        package_name="sample",
+    ).write_toml_file(package_file)
+    monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
+    monkeypatch.setattr("pyconjury.services.doctor_service._agents_skills_folder", lambda: tmp_path / "skills")
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.create_default_file_system_link_creator",
+        lambda: SimpleNamespace(validate_directory_link_for_removal=lambda _source, _destination: False),
+    )
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="sample v1.0.0\n"),
+    )
+
+    actions, issues = ConjuryDoctorService().prune()
+
+    assert actions == ["Removed broken package registration 'sample' and its Skill links; kept its uv tool."]
+    assert issues == []
+    assert not package_file.exists()
+    assert sentinel.read_text(encoding="utf-8") == "preserve"
+
+
+def test_prune_keeps_broken_skill_when_link_points_elsewhere(monkeypatch, tmp_path: Path) -> None:
+    storage_folder = tmp_path / "storage"
+    storage_folder.mkdir()
+    package_folder = tmp_path / "package"
+    create_registered_package(storage_folder, package_folder)
+    (package_folder / "skills" / "public" / "SKILL.md").unlink()
+    monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
+
+    def reject_link(_source: Path, _destination: Path) -> bool:
+        raise FileExistsError("destination points elsewhere")
+
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.create_default_file_system_link_creator",
+        lambda: SimpleNamespace(validate_directory_link_for_removal=reject_link),
+    )
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="sample v1.0.0\n"),
+    )
+    package_file = storage_folder / "sample.toml"
+    original_package = PackageSkills.from_toml_file(package_file)
+
+    actions, issues = ConjuryDoctorService().prune()
+
+    assert actions == []
+    assert any("Invalid Skill link" in issue for issue in issues)
+    assert PackageSkills.from_toml_file(package_file) == original_package
+
+
+def test_prune_leaves_invalid_registration_metadata_for_manual_repair(monkeypatch, tmp_path: Path) -> None:
+    storage_folder = tmp_path / "storage"
+    storage_folder.mkdir()
+    package_file = storage_folder / "invalid.toml"
+    package_file.write_text("[", encoding="utf-8")
+    monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
+
+    actions, issues = ConjuryDoctorService().prune()
+
+    assert actions == []
+    assert any("Invalid PackageSkills TOML" in issue for issue in issues)
+    assert package_file.read_text(encoding="utf-8") == "["

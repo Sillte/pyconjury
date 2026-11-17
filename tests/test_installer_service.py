@@ -124,6 +124,67 @@ def test_install_local_python_project_registers_public_skills(monkeypatch, tmp_p
     assert PackageSkills.from_toml_file(storage_folder / "local-project.toml") == result
 
 
+def test_force_install_replaces_same_source_skill_links_and_registration(monkeypatch, tmp_path: Path) -> None:
+    project_folder = tmp_path / "local-project"
+    project_folder.mkdir()
+    create_public_repository(project_folder)
+    extra_skill_folder = project_folder / "skills" / "extra"
+    extra_skill_folder.mkdir()
+    (extra_skill_folder / "SKILL.md").write_text("Run `uvx sample --help`.", encoding="utf-8")
+    stale_skill_folder = project_folder / "skills" / "stale"
+    stale_skill_folder.mkdir()
+    (stale_skill_folder / "SKILL.md").write_text("No published command.", encoding="utf-8")
+
+    storage_folder = tmp_path / "pyconjury"
+    storage_folder.mkdir()
+    package_file = storage_folder / "local-project.toml"
+    PackageSkills(
+        package_link=LocalPackagePath(path=project_folder.resolve()),
+        skill_paths=[
+            SkillPath(rel_path=Path("skills/public")),
+            SkillPath(rel_path=Path("skills/stale")),
+        ],
+        package_name="sample",
+    ).write_toml_file(package_file)
+
+    skills_folder = tmp_path / ".agents" / "skills"
+    removed_links: list[tuple[Path, Path]] = []
+    created_links: list[tuple[Path, Path]] = []
+    validated_new_links: list[tuple[Path, Path]] = []
+    monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
+    monkeypatch.setattr("pyconjury.services.installer_service._agents_skills_folder", lambda: skills_folder)
+    monkeypatch.setattr("pyconjury.services.installer_service._install_tool", lambda _source: None)
+    monkeypatch.setattr(
+        "pyconjury.services.installer_service.create_default_file_system_link_creator",
+        lambda: SimpleNamespace(
+            validate_directory_link=lambda source, destination: validated_new_links.append((source, destination))
+            or False,
+            validate_directory_link_for_removal=lambda _source, _destination: True,
+            remove_directory_link=lambda source, destination: removed_links.append((source, destination)),
+            create_directory_link=lambda source, destination: created_links.append((source, destination)),
+        ),
+    )
+
+    result = ConjuryInstallService().install(str(project_folder), force=True)
+
+    assert result.skill_paths == [
+        SkillPath(rel_path=Path("skills/extra")),
+        SkillPath(rel_path=Path("skills/public")),
+    ]
+    assert removed_links == [
+        (project_folder / "skills/public", skills_folder / "public"),
+        (project_folder / "skills/stale", skills_folder / "stale"),
+    ]
+    assert validated_new_links == [(project_folder / "skills/extra", skills_folder / "extra")]
+    assert created_links == [
+        (project_folder / "skills/extra", skills_folder / "extra"),
+        (project_folder / "skills/public", skills_folder / "public"),
+    ]
+    assert project_folder.is_dir()
+    assert stale_skill_folder.is_dir()
+    assert PackageSkills.from_toml_file(package_file) == result
+
+
 def test_install_rejects_a_skill_name_registered_by_another_package(monkeypatch, tmp_path: Path) -> None:
     project_folder = tmp_path / "new-project"
     project_folder.mkdir()
@@ -144,7 +205,7 @@ def test_install_rejects_a_skill_name_registered_by_another_package(monkeypatch,
     )
 
     with pytest.raises(PyConjuryError, match="already registered"):
-        ConjuryInstallService().install(str(project_folder))
+        ConjuryInstallService().install(str(project_folder), force=True)
 
     assert not (storage_folder / "new-project.toml").exists()
 
