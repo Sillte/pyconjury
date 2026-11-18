@@ -108,6 +108,55 @@ version = "0.1.0"
     assert SkillSearcher(tmp_path).infer_public_skills() == []
 
 
+@pytest.mark.parametrize(
+    ("fence", "command_line"),
+    [("```", "sample --help"), ("~~~", "$ sample --help")],
+)
+def test_infer_public_skills_accepts_declared_command_in_code_block(
+    tmp_path: Path, fence: str, command_line: str
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "sample"
+version = "0.1.0"
+
+[project.scripts]
+sample = "sample.cli:main"
+""",
+        encoding="utf-8",
+    )
+    skill = tmp_path / "skills" / "skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(f"{fence}console\n{command_line}\n{fence}", encoding="utf-8")
+
+    assert SkillSearcher(tmp_path).infer_public_skills() == ["skill"]
+
+
+def test_infer_public_skills_does_not_match_command_mentions_outside_code_blocks_or_partial_names(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "sample"
+version = "0.1.0"
+
+[project.scripts]
+sample = "sample.cli:main"
+""",
+        encoding="utf-8",
+    )
+    skill = tmp_path / "skills" / "skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "Run sample in your terminal.\n\n```console\nsample-extra --help\n```",
+        encoding="utf-8",
+    )
+
+    assert SkillSearcher(tmp_path).infer_public_skills() == []
+
+
 @pytest.mark.parametrize("runner", ["uvx", "uv tool run"])
 def test_infer_public_skills_accepts_uv_cli_invocation_forms(tmp_path: Path, runner: str) -> None:
     (tmp_path / "pyproject.toml").write_text(

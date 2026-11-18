@@ -97,7 +97,9 @@ the installation manually.
 
 The Python project must have a `[project.scripts]` table in `pyproject.toml`.
 A `SKILL.md` is treated as public when it invokes one of those commands using
-`uvx <command>` or `uv tool run <command>`.
+`uvx <command>` or `uv tool run <command>`, or when a fenced code block
+contains a line beginning with one of those commands (optionally preceded by
+a `$` shell prompt).
 
 GitHub installation clones or updates the repository. Local installation uses
 the project directory as-is and requires a `pyproject.toml`. Both install the

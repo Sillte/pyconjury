@@ -50,6 +50,34 @@ class SkillSearcher:
             for invocation in (rf"uvx[ \t]+{escaped_command}", rf"uv[ \t]+tool[ \t]+run[ \t]+{escaped_command}"):
                 if re.search(rf"(?<![\w.-]){invocation}(?=$|[\s`'\"])", content):
                     return True
+            if self._contains_cli_command_in_code_block(content, command):
+                return True
+        return False
+
+    def _contains_cli_command_in_code_block(self, content: str, command: str) -> bool:
+        command_pattern = re.compile(rf"^[ \t]*(?:\$[ \t]*)?{re.escape(command)}(?=$|[ \t;&|])")
+        fence_character: str | None = None
+        fence_length = 0
+
+        for line in content.splitlines():
+            if fence_character is None:
+                opening_fence = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})", line)
+                if opening_fence is not None:
+                    fence = opening_fence.group(1)
+                    fence_character = fence[0]
+                    fence_length = len(fence)
+                continue
+
+            closing_fence = re.match(
+                rf"^[ \t]{{0,3}}{re.escape(fence_character)}{{{fence_length},}}[ \t]*$",
+                line,
+            )
+            if closing_fence is not None:
+                fence_character = None
+                fence_length = 0
+            elif command_pattern.match(line):
+                return True
+
         return False
 
     def get_cli_commands(self) -> Sequence[str]:
