@@ -47,7 +47,12 @@ class SkillSearcher:
         content = skill_file.read_text(encoding="utf-8")
         for command in cli_commands:
             escaped_command = re.escape(command)
-            for invocation in (rf"uvx[ \t]+{escaped_command}", rf"uv[ \t]+tool[ \t]+run[ \t]+{escaped_command}"):
+            source_option = r"""(?:--from[ \t]+(?:"[^"]+"|'[^']+'|[^\s`'"]+)[ \t]+)?"""
+            invocations = (
+                rf"uvx[ \t]+{source_option}{escaped_command}",
+                rf"uv[ \t]+tool[ \t]+run[ \t]+{source_option}{escaped_command}",
+            )
+            for invocation in invocations:
                 if re.search(rf"(?<![\w.-]){invocation}(?=$|[\s`'\"])", content):
                     return True
             if self._contains_cli_command_in_code_block(content, command):

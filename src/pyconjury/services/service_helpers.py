@@ -3,6 +3,7 @@ import tomllib
 from pathlib import Path
 
 from pyconjury.models.errors import PyConjuryError
+from pyconjury.models.github_storage import GitHubLocalStorage
 from pyconjury.models.links import GithubPackageURL, PackageLink
 from pyconjury.models.package_skills import PackageSkills
 from pyconjury.models.storage import PyconjuryStorage
@@ -22,9 +23,9 @@ def _normalize_package_name(package_name: str) -> str:
     return re.sub(r"[-_.]+", "-", package_name).casefold()
 
 
-def _package_folder_for(storage: PyconjuryStorage, package_key: str, package: PackageSkills) -> Path:
+def _package_folder_for(storage: PyconjuryStorage, package: PackageSkills) -> Path:
     if isinstance(package.package_link, GithubPackageURL):
-        return storage.github_folder / package_key
+        return GitHubLocalStorage.package_folder(storage.github_folder, package.package_link.url)
     return package.package_link.path
 
 

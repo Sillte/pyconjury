@@ -38,7 +38,7 @@ class ConjuryUninstallService:
         if len(source_matches) > 1:
             package_names = sorted(
                 {
-                    package.package_name or _read_package_name(_package_folder_for(storage, name, package))
+                    package.package_name or _read_package_name(_package_folder_for(storage, package))
                     for name, package in source_matches
                 },
                 key=str.casefold,
@@ -54,7 +54,7 @@ class ConjuryUninstallService:
             selected_packages = []
             for name, package in packages:
                 registered_name = package.package_name or _read_package_name(
-                    _package_folder_for(storage, name, package)
+                    _package_folder_for(storage, package)
                 )
                 if _normalize_package_name(registered_name) == _normalize_package_name(target):
                     selected_packages.append((name, package))
@@ -68,7 +68,7 @@ class ConjuryUninstallService:
         )
 
         package_names = {
-            _read_package_name(_package_folder_for(storage, name, package))
+            _read_package_name(_package_folder_for(storage, package))
             if package.package_name is None
             else package.package_name
             for name, package in selected_packages
@@ -82,7 +82,7 @@ class ConjuryUninstallService:
         for name, package in packages:
             if name in selected_keys:
                 continue
-            other_package_name = package.package_name or _read_package_name(_package_folder_for(storage, name, package))
+            other_package_name = package.package_name or _read_package_name(_package_folder_for(storage, package))
             if _normalize_package_name(other_package_name) in normalized_package_names:
                 shared_package = True
                 break
@@ -91,7 +91,7 @@ class ConjuryUninstallService:
         skills_folder = _agents_skills_folder()
         links = [
             (
-                _package_folder_for(storage, package_key, package) / skill_path.rel_path,
+                _package_folder_for(storage, package) / skill_path.rel_path,
                 skills_folder / skill_path.skill_name,
             )
             for package_key, package in selected_packages

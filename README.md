@@ -55,6 +55,7 @@ Invalid metadata and links that point elsewhere are left for manual repair.
 
 ```console
 pyconjury install https://github.com/owner/repository
+pyconjury install "git+https://github.com/owner/monorepo@main#subdirectory=packages/project"
 pyconjury install ./path/to/project
 pyconjury install --force ./path/to/project
 ```
@@ -67,6 +68,7 @@ from other sources.
 
 ```console
 pyconjury uninstall https://github.com/owner/repository
+pyconjury uninstall "git+https://github.com/owner/monorepo@main#subdirectory=packages/project"
 pyconjury uninstall ./path/to/project
 pyconjury uninstall project-name
 ```
@@ -97,15 +99,19 @@ the installation manually.
 
 The Python project must have a `[project.scripts]` table in `pyproject.toml`.
 A `SKILL.md` is treated as public when it invokes one of those commands using
-`uvx <command>` or `uv tool run <command>`, or when a fenced code block
-contains a line beginning with one of those commands (optionally preceded by
-a `$` shell prompt).
+`uvx` or `uv tool run`, optionally with `--from <package>`, or when a fenced
+code block contains a line beginning with one of those commands (optionally
+preceded by a `$` shell prompt).
 
-GitHub installation clones or updates the repository. Local installation uses
-the project directory as-is and requires a `pyproject.toml`. Both install the
-CLI commands with `uv tool install`, write package metadata as TOML, and link
-public Skills under `~/.agents/skills/`. Windows uses directory junctions;
-other supported platforms use symbolic links.
+GitHub installation clones or updates the repository. Use uv's Git URL syntax
+with `#subdirectory=<package-path>` to select a Python package inside a
+monorepo; add `@<revision>` before the fragment to select a branch, tag, or
+commit. If omitted, the repository's default revision is used. GitHub
+`/tree/{branch}/{package-path}` URLs are also accepted. Local installation
+uses the project directory as-is and requires a `pyproject.toml`. Both install
+the CLI commands with `uv tool install`, write package metadata as TOML, and
+link public Skills under `~/.agents/skills/`. Windows uses directory
+junctions; other supported platforms use symbolic links.
 
 Git is required for GitHub installation; uv is required for both. Set
 `PYCONJURY_HOME` to override the local repository and metadata storage

@@ -36,7 +36,7 @@ class ConjuryRemoveSkillService:
         if len(matches) > 1:
             registrations = sorted(
                 {
-                    f"{package.package_name or _read_package_name(_package_folder_for(storage, package_key, package))} "
+                    f"{package.package_name or _read_package_name(_package_folder_for(storage, package))} "
                     f"({package_key})"
                     for package_key, package, _ in matches
                 },
@@ -48,7 +48,7 @@ class ConjuryRemoveSkillService:
             )
 
         package_key, package, selected_skill = matches[0]
-        package_folder = _package_folder_for(storage, package_key, package)
+        package_folder = _package_folder_for(storage, package)
         remaining_skill_paths = [
             skill_path for skill_path in package.skill_paths if skill_path != selected_skill
         ]

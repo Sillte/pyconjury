@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from pyconjury.models.errors import PyConjuryError
+from pyconjury.models.github_storage import GitHubLocalStorage
 from pyconjury.models.links import GithubPackageURL, LocalPackagePath, SkillPath
 from pyconjury.models.package_skills import PackageSkills
 from pyconjury.services.doctor_service import ConjuryDoctorService
@@ -69,6 +70,135 @@ def test_install_github_registers_public_skills_and_creates_links(monkeypatch, t
     assert installed_urls == ["https://github.com/example/sample-repo"]
     assert created_links == [(repository_folder / "skills" / "public", skills_folder / "public")]
     assert PackageSkills.from_toml_file(storage_folder / "sample-repo.toml") == result
+
+
+def test_github_package_url_resolves_repository_revision_and_subdirectory() -> None:
+    source = GitHubLocalStorage.parse_package_url(
+        "https://github.com/example/monorepo/tree/main/packages/tool"
+    )
+
+    assert source.repository_url == "https://github.com/example/monorepo"
+    assert source.revision == "main"
+    assert source.subdirectory == Path("packages/tool")
+    assert source.package_key == "monorepo--ref-main--packages%2Ftool"
+    assert source.tool_source == "git+https://github.com/example/monorepo@main#subdirectory=packages/tool"
+
+
+@pytest.mark.parametrize(
+    ("url", "revision"),
+    [
+        ("git+https://github.com/example/monorepo#subdirectory=packages/tool", None),
+        ("git+https://github.com/example/monorepo@main#subdirectory=packages/tool", "main"),
+        ("git+https://github.com/example/monorepo.git@feature/cli#subdirectory=packages/tool", "feature/cli"),
+    ],
+)
+def test_github_package_url_accepts_uv_vcs_and_subdirectory_syntax(url: str, revision: str | None) -> None:
+    source = GitHubLocalStorage.parse_package_url(url)
+
+    assert source.repository_url == "https://github.com/example/monorepo"
+    assert source.revision == revision
+    assert source.subdirectory == Path("packages/tool")
+    assert source.tool_source == (
+        "git+https://github.com/example/monorepo"
+        + (f"@{revision}" if revision else "")
+        + "#subdirectory=packages/tool"
+    )
+
+
+def test_github_package_url_rejects_paths_outside_repository() -> None:
+    with pytest.raises(PyConjuryError, match="stay inside the repository"):
+        GitHubLocalStorage.parse_package_url(
+            "https://github.com/example/monorepo/tree/main/packages/%2E%2E/secret"
+        )
+    with pytest.raises(PyConjuryError, match="stay inside the repository"):
+        GitHubLocalStorage.parse_package_url(
+            "git+https://github.com/example/monorepo#subdirectory=packages/%2E%2E/secret"
+        )
+
+
+def test_fetch_github_tree_clones_repository_and_checks_out_requested_ref(
+    monkeypatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[tuple[str, ...], dict[str, Path | None]]] = []
+
+    def fake_run_git(*args: str, cwd: Path | None = None) -> str:
+        calls.append((args, {"cwd": cwd}))
+        return ""
+
+    monkeypatch.setattr(GitHubLocalStorage, "_run_git", staticmethod(fake_run_git))
+    github_folder = tmp_path / "github"
+    repository_folder = github_folder / "_refs" / "monorepo" / "main"
+
+    result = GitHubLocalStorage(github_folder).fetch(
+        "https://github.com/example/monorepo/tree/main/packages/tool"
+    )
+
+    assert result == repository_folder
+    assert calls == [
+        (
+            ("clone", "--", "https://github.com/example/monorepo", str(repository_folder)),
+            {"cwd": github_folder},
+        ),
+        (
+            ("-C", str(repository_folder), "checkout", "main"),
+            {"cwd": None},
+        ),
+    ]
+
+
+def test_install_github_monorepo_package_registers_and_uses_subdirectory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    storage_folder = tmp_path / "pyconjury"
+    repository_folder = storage_folder / "github" / "_refs" / "monorepo" / "main"
+    package_folder = repository_folder / "packages" / "tool"
+    package_folder.mkdir(parents=True)
+    create_public_repository(package_folder)
+    source_url = "git+https://github.com/example/monorepo@main#subdirectory=packages/tool"
+    skills_folder = tmp_path / ".agents" / "skills"
+    fetched_urls: list[tuple[str, bool]] = []
+    installed_sources: list[str | Path] = []
+    created_links: list[tuple[Path, Path]] = []
+
+    def fake_fetch(_storage, url: str, *, update: bool) -> Path:
+        fetched_urls.append((url, update))
+        return repository_folder
+
+    def validate_directory_link(target: Path, link_path: Path) -> None:
+        assert target == package_folder / "skills" / "public"
+        assert link_path == skills_folder / "public"
+
+    monkeypatch.setenv("PYCONJURY_HOME", str(storage_folder))
+    monkeypatch.setattr("pyconjury.models.github_storage.GitHubLocalStorage.fetch", fake_fetch)
+    monkeypatch.setattr("pyconjury.services.installer_service._agents_skills_folder", lambda: skills_folder)
+    monkeypatch.setattr("pyconjury.services.installer_service._install_tool", installed_sources.append)
+    monkeypatch.setattr(
+        "pyconjury.services.installer_service.create_default_file_system_link_creator",
+        lambda: SimpleNamespace(
+            validate_directory_link=validate_directory_link,
+            create_directory_link=lambda target, link_path: created_links.append((target, link_path)),
+        ),
+    )
+    monkeypatch.setattr("pyconjury.services.doctor_service._agents_skills_folder", lambda: skills_folder)
+    monkeypatch.setattr("pyconjury.services.doctor_service._check_uv_tools", lambda _names, _issues: None)
+    monkeypatch.setattr(
+        "pyconjury.services.doctor_service.create_default_file_system_link_creator",
+        lambda: SimpleNamespace(validate_directory_link_for_removal=lambda _source, _link: True),
+    )
+
+    result = ConjuryInstallService().install(source_url)
+
+    assert result.package_link == GithubPackageURL(url=source_url)
+    assert result.package_name == "sample"
+    assert result.skill_paths == [SkillPath(rel_path=Path("skills/public"))]
+    assert fetched_urls == [(source_url, True)]
+    assert installed_sources == [
+        "git+https://github.com/example/monorepo@main#subdirectory=packages/tool"
+    ]
+    assert created_links == [(package_folder / "skills" / "public", skills_folder / "public")]
+    assert PackageSkills.from_toml_file(storage_folder / "monorepo--ref-main--packages%2Ftool.toml") == result
+    assert GitHubLocalStorage.package_folder(storage_folder / "github", source_url) == package_folder
+    assert ConjuryDoctorService().check() == []
 
 
 def test_install_github_rejects_repositories_without_public_skills(monkeypatch, tmp_path: Path) -> None:

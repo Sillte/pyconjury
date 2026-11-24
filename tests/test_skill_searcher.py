@@ -175,3 +175,26 @@ sample = "sample.cli:main"
     (skill / "SKILL.md").write_text(f"Run `{runner} sample --help`.", encoding="utf-8")
 
     assert SkillSearcher(tmp_path).infer_public_skills() == ["skill"]
+
+
+@pytest.mark.parametrize("runner", ["uvx", "uv tool run"])
+def test_infer_public_skills_accepts_uv_from_option(tmp_path: Path, runner: str) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "sample"
+version = "0.1.0"
+
+[project.scripts]
+sample = "sample.cli:main"
+""",
+        encoding="utf-8",
+    )
+    skill = tmp_path / "skills" / "skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        f"Run `{runner} --from ./packages/sample sample --help`.",
+        encoding="utf-8",
+    )
+
+    assert SkillSearcher(tmp_path).infer_public_skills() == ["skill"]

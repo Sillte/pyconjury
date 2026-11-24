@@ -15,7 +15,7 @@ class ConjuryPackageQueryService:
         for package_key in storage.package_names:
             package = storage.get_package_skills(package_key)
             package_name = package.package_name or _read_package_name(
-                _package_folder_for(storage, package_key, package)
+                _package_folder_for(storage, package)
             )
             packages.append((package_name, package))
         return sorted(packages, key=lambda entry: _normalize_package_name(entry[0]))

@@ -34,8 +34,21 @@ class ConjuryInstallService:
 
     def install_github(self, url: str, *, force: bool = False) -> PackageSkills:
         storage = PyconjuryStorage.from_storage_folder()
-        repository_folder = storage.github_storage.fetch(url, update=True)
-        return self._install_package(storage, repository_folder, GithubPackageURL(url=url), url, force)
+        github_storage = storage.github_storage
+        github_source = github_storage.parse_package_url(url)
+        repository_folder = github_storage.fetch(url, update=True)
+        package_folder = github_source.package_folder(repository_folder)
+        if not package_folder.is_dir():
+            raise PyConjuryError(f"GitHub package directory does not exist: {package_folder}")
+        if not (package_folder / "pyproject.toml").is_file():
+            raise PyConjuryError(f"GitHub package directory does not contain pyproject.toml: {package_folder}")
+        return self._install_package(
+            storage,
+            package_folder,
+            GithubPackageURL(url=url),
+            github_source.tool_source,
+            force,
+        )
 
     def install_local(self, path: Path, *, force: bool = False) -> PackageSkills:
         package_folder = path.expanduser().resolve()
@@ -77,9 +90,14 @@ class ConjuryInstallService:
             skill_paths=skill_paths,
             package_name=package_name,
         )
-        package_file = storage.root_folder / f"{package_folder.name}.toml"
+        package_key = (
+            storage.github_storage.parse_package_url(package_link.url).package_key
+            if isinstance(package_link, GithubPackageURL)
+            else package_folder.name
+        )
+        package_file = storage.root_folder / f"{package_key}.toml"
         existing_package = _check_existing_package_file(package_file, package_skills)
-        _check_skill_name_collisions(storage, package_file.stem, skill_paths)
+        _check_skill_name_collisions(storage, package_key, skill_paths)
 
         if storage.root_folder.exists() and not storage.root_folder.is_dir():
             raise PyConjuryError(

@@ -10,6 +10,7 @@ from pyconjury.infra.filesystem_link_creator import (
     create_default_file_system_link_creator,
 )
 from pyconjury.models.errors import PyConjuryError
+from pyconjury.models.github_storage import GitHubLocalStorage
 from pyconjury.models.links import GithubPackageURL, SkillPath
 from pyconjury.models.package_skills import PackageSkills
 from pyconjury.models.storage import PyconjuryStorage
@@ -70,7 +71,7 @@ class ConjuryDoctorService:
         link_creator = create_default_file_system_link_creator()
 
         for package_file, package, selected_skills in selected_packages:
-            package_folder = _package_folder_for(storage_folder, package_file.stem, package)
+            package_folder = _package_folder_for(storage_folder, package)
             if check_package:
                 project_name = _check_package_source(package_file.stem, package, package_folder, issues)
                 registered_name = package.package_name or project_name
@@ -157,7 +158,7 @@ def _prepare_prune_actions(package_name: str | None, skill_name: str | None) -> 
     link_creator = create_default_file_system_link_creator()
     actions: list[_PruneAction] = []
     for package_file, package, selected_skills in selected_packages:
-        package_folder = _package_folder_for(storage_folder, package_file.stem, package)
+        package_folder = _package_folder_for(storage_folder, package)
         missing_package_source = not package_folder.is_dir() or not (package_folder / "pyproject.toml").is_file()
         if missing_package_source and skill_name is None:
             skill_paths = tuple(package.skill_paths)
@@ -259,9 +260,9 @@ def _agents_skills_folder() -> Path:
     return Path.home() / ".agents" / "skills"
 
 
-def _package_folder_for(storage_folder: Path, package_key: str, package: PackageSkills) -> Path:
+def _package_folder_for(storage_folder: Path, package: PackageSkills) -> Path:
     if isinstance(package.package_link, GithubPackageURL):
-        return storage_folder / "github" / package_key
+        return GitHubLocalStorage.package_folder(storage_folder / "github", package.package_link.url)
     return package.package_link.path
 
 
@@ -273,7 +274,7 @@ def _matches_package_name(
 ) -> bool:
     registered_name = package.package_name
     if registered_name is None:
-        package_folder = _package_folder_for(storage_folder, package_key, package)
+        package_folder = _package_folder_for(storage_folder, package)
         registered_name = _read_project_name(package_folder)
     return registered_name is not None and _normalize_package_name(registered_name) == _normalize_package_name(
         requested_name
