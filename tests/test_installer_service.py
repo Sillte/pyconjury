@@ -487,6 +487,10 @@ def test_uninstall_by_package_name_removes_all_shared_registrations(monkeypatch,
             remove_directory_link=lambda source, destination: removed_links.append((source, destination)),
         ),
     )
+    monkeypatch.setattr(
+        "pyconjury.models.storage.PyconjuryStorage.package_names",
+        property(lambda _storage: ["project-b", "project-a"]),
+    )
 
     tool_removed, removed_skill_names = ConjuryUninstallService().uninstall("sample")
 

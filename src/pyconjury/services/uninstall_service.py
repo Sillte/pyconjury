@@ -33,7 +33,8 @@ class ConjuryUninstallService:
 
     def _prepare_uninstall(self, target: str) -> _UninstallPlan:
         storage = PyconjuryStorage.from_storage_folder()
-        packages = [(name, storage.get_package_skills(name)) for name in storage.package_names]
+        package_names = sorted(storage.package_names, key=lambda name: (name.casefold(), name))
+        packages = [(name, storage.get_package_skills(name)) for name in package_names]
         source_matches = [entry for entry in packages if _matches_package_source(target, entry[1].package_link)]
         if len(source_matches) > 1:
             package_names = sorted(
